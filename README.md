@@ -14,6 +14,6 @@ The first three steps are dependent of each other i.e. the output of the previou
 # Methodology
 This study requires an access to a Linux-based computer resource and also requires programming language such as R and whole genome association analysis software called PLINK (of their latest version)
 
-## For each step, separate scripts will be available to showcase all the commands that i will use in-order to complete the study.
+# For each step, separate scripts will be available to showcase all the commands that i will use in-order to complete the study.
 
 
