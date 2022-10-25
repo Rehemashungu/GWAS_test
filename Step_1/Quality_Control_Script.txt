@@ -1,0 +1,244 @@
+#/current/working/directory/config.txt
+################ Explanation of the main script ##########################
+
+# for this test, used the freely available HapMap data: hapmap3_r3_b36_fwd.consensus.qc. We simulated a binary outcome measure (i.e., a binary phenotypic trait) and added this to the dataset. The outcome measure was only simulated for the founders in the HapMap data. This data set will be referred to as HapMap_3_r3_1. 
+# The HapMap data, without our simulated outcome measure, can also be obtained from 
+http://hapmap.ncbi.nlm.nih.gov/downloads/genotypes/2010-05_phaseIII/plink_format/ 
+# Comments are included as they explain how these scripts work. Note, in order to complete the tutorial it is essential to execute all commands in this tutorial.
+# This script can also be used for your own data analysis, to use it as such, replace the name of the HapMap file with the name of your own data file. 
+# Furthermore, this script is based on a binary outcome measure, and is therefore not applicable for quantitative outcome measures (this would require some adaptations)
+# Note, most GWAS studies are performed on an ethnic homogenous population, in which population outliers are removed. 
+# The HapMap data, used for this tutorial, contains multiple distinct ethnic groups, which makes it problematic for analysis.
+# Therefore, we have selected only the EUR individuals of the complete HapMap sample for the tutorials 1-3. This selection is already performed in the HapMap_3_r3_1 file from the original GitHub page (https://github.com/MareesAT/GWA_tutorial)
+# The Rscripts used in this tutorial are all executed from the Unix command line but will also be used in separate practice using R and python
+
+# For a thorough theoretical explanation of all QC steps we refer to the article accompanying this tutorial entitled “A tutorial on conducting Genome-Wide-Association Studies: Quality control and statistical analysis” (https://www.ncbi.nlm.nih.gov/pubmed/29484742).
+# and in its original github page at https://github.com/MareesAT/GWA_tutorial
+
+##############################################################
+############### START ANALISIS ###############################
+##############################################################
+
+### Note this is bash script converted to notes for reading purposes.
+
+# From its orginial github page, Download the 1_QC_GWAS.zip and extract the files to your current working directory
+
+# Change directory to a folder on your UNIX device containing all files from ‘1_QC_GWAS.zip’. 
+# cd /go/to/current/working/directory/folder containing your files
+
+### Step 1 ### 
+
+## you can opt to make a directory for your input and output files, but here, all the input and output obtained are saved in the QC directory
+
+# Investigate missingness per individual and per SNP and make histograms.
+ ${plink} --bfile ${QC}HapMap_3_r3_1 --missing --out ${QC}step1QC
+   
+# output: plink.imiss and plink.lmiss, these files show respectively the proportion of missing SNPs per individual and the proportion of missing individuals per SNP.
+
+# Generate plots to visualize the missingness results.
+ Rscript --no-save ${QC}hist_miss.R
+
+# Delete SNPs and individuals with high levels of missingness,
+# this will exclude all SNPs with low genotype calls and are missed in a large proportion,and
+# individuals that have high rates of genotype missingness.
+
+# The following two QC commands will not remove any SNPs or individuals. 
+# However, it is good practice to start the QC with these non-stringent thresholds i.e of 0.2 
+
+# Delete SNPs with missingness >0.2.
+${plink} --bfile ${QC}HapMap_3_r3_1 --geno 0.2 --make-bed --out ${QC}HapMap_3_r3_2
+
+# Delete individuals with missingness >0.2.
+${plink} --bfile ${QC}HapMap_3_r3_2 --mind 0.2 --make-bed --out ${QC}HapMap_3_r3_3
+rm ${QC}HapMap_3_r3_2*
+
+# Delete SNPs with missingness >0.02.
+###plink --bfile HapMap_3_r3_3 --geno 0.02 --make-bed --out HapMap_3_r3_4
+
+# Delete individuals with missingness >0.02.
+###plink --bfile HapMap_3_r3_4 --mind 0.02 --make-bed --out HapMap_3_r3_5
+
+## if a significant number of poorly genotyped sampkes are found, it is desirable to remove those individuals and re-call the genotypes.
+## the thresholds of 0.2 and 0.02 may vary depending on the study. but first exclude missingness in the SNPs then in individuals.
+
+###################################################################
+### Step2 ####
+
+# Check for sex discrepancy to ensure that hasnt been swapping of samples,
+## Thus this is done by comparison from the metadata and the individual's genotype that is measured from computing the inbreeding co-effecient of the X-chromosome ( X chromosome inbreeding (homozygosity) estimate)
+
+## Plink computes this using the F-statistic, thus
+# Subjects who were a priori determined as females must have a F value of <0.2, and subjects who were a priori determined as males must have a F value >0.8. 
+# Subjects who do not fulfil these requirements are flagged "PROBLEM" by PLINK.
+${plink} --bfile ${QC}HapMap_3_r3_3 --check-sex --out ${QC}GENDER
+
+
+## this can be used for the purpose of testing correct labellings and record keeping, thus individulas who fail the F-statistic test should be removed.
+
+# Generate plots to visualize the sex-check results.
+Rscript --no-save ${QC}gender_check.R
+
+# These checks indicate that there is one woman with a sex discrepancy, F value of 0.99. 
+#(When using other datasets often a few discrepancies will be found). 
+
+# if individuals are found to be with sex discrepancy. can either be
+
+# 1) Delete individuals with sex discrepancy.
+
+# first we generate a list of individuals with the status “PROBLEM”.
+grep "PROBLEM" ${QC}GENDER.sexcheck | awk '{print$1,$2}' > ${QC}sex_discrepancy.txt
+
+## This command removes the list of individuals with the status “PROBLEM”
+${plink} --bfile ${QC}HapMap_3_r3_3 --remove ${QC}sex_discrepancy.txt --make-bed --out ${QC}HapMap_3_r3_4 
+rm ${QC}HapMap_3_r3_3*
+
+# 2) impute-sex.
+### ${plink} --bfile ${QC}HapMap_3_r3_3 --impute-sex --make-bed --out ${QC}HapMap_3_r3_4X
+# This imputes the sex based on the genotype information into your data set.
+
+###################################################
+
+### Step 3 ### 
+
+# Generate a bfile with autosomal SNPs only and delete SNPs with a low minor allele frequency (MAF).
+
+# Select autosomal SNPs only (i.e., from chromosomes 1 to 22).
+awk '{ if ($1 >= 1 && $1 <= 22) print $2 }' ${QC}HapMap_3_r3_4.bim > ${QC}snp_1_22.txt
+
+# Extract the snp from chr_1_to_22
+${plink} --bfile ${QC}HapMap_3_r3_4 --extract ${QC}snp_1_22.txt --make-bed --out ${QC}HapMap_3_r3_5
+rm ${QC}HapMap_3_r3_4*
+
+# Generate a plot of the MAF distribution.
+${plink} --bfile ${QC}HapMap_3_r3_5 --freq --out ${QC}MAF_check
+Rscript --no-save MAF_check.R
+
+# Remove SNPs with a low MAF frequency as SNPs with low MAD have low power to detect their associations and have high impact on multiple testing correction
+${plink} --bfile ${QC}HapMap_3_r3_5 --maf 0.05 --make-bed --out ${QC}HapMap_3_r3_6
+
+# The MAF threshold will depend on the sample size
+# 1073226 SNPs are left
+
+rm ${QC}HapMap_3_r3_5*
+
+####################################################
+### Step 4 ###
+
+# Delete SNPs which deviate from Hardy-Weinberg equilibrium (HWE).
+#  First check the distribution of HWE p-values of all SNPs.
+${plink} --bfile ${QC}HapMap_3_r3_6 --hardy --out ${QC}Step4HWE
+
+# Selecting SNPs with HWE p-value below 0.00001, required for one of the two plot generated by the next Rscript, allows to zoom in on strongly deviating SNPs. 
+awk '{ if ($9 <0.00001) print $0 }' ${QC}Step4HWE.hwe> ${QC}plinkzoomhwe.hwe
+Rscript --no-save hwe.R
+
+# But by default, the --hwe option in plink only filters for controls.
+# Therefore, we use two steps, first we use a stringent HWE threshold for controls, followed by a less stringent threshold for the case data.
+
+${plink} --bfile ${QC}HapMap_3_r3_6 --hwe 1e-6 --hwe-all  --make-bed --out ${QC}HapMap_3_r3_7
+rm ${QC}HapMap_3_r3_6*
+
+# The HWE threshold for the cases filters out only SNPs which deviate extremely from HWE. 
+# This second HWE step only focusses on cases because in the controls all SNPs with a HWE p-value < hwe 1e-6 were already removed
+#####plink --bfile HapMap_hwe_filter_step1 --hwe 1e-10 --hwe-all --make-bed --out HapMap_3_r3_9
+
+# Theoretical background for this step is given in our accompanying article: https://www.ncbi.nlm.nih.gov/pubmed/29484742 .
+
+############################################################
+### step 5 ###
+
+# Generate a plot of the distribution of the heterozygosity rate of your subjects.
+# And remove individuals with a heterozygosity rate deviating more than 3 sd from the mean.
+
+# Checks for heterozygosity are performed on a set of SNPs which are not highly correlated.
+
+# Therefore, to generate a list of non-(highly)correlated SNPs, we exclude high inversion regions (inversion.txt [High LD regions]) 
+#and prune the SNPs using the command --indep-pairwise’.
+
+# The parameters ‘50 5 0.2’ stand respectively for: the window size,
+# the number of SNPs to shift the window at each step, and the multiple correlation coefficient for a SNP being regressed on all other SNPs simultaneously.
+##--exclude inversion.txt
+
+${plink} --bfile ${QC}HapMap_3_r3_7 --exclude ${QC}inversion.txt --range --indep-pairwise 50 5 0.2 --out ${QC}indepSNP
+# Note, don't delete the file indepSNP.prune.in, we will use this file in later steps of the tutorial.
+
+${plink} --bfile ${QC}HapMap_3_r3_7 --extract ${QC}indepSNP.prune.in --het --out ${QC}R_check
+
+# This file contains your pruned data set.
+
+# Plot of the heterozygosity rate distribution
+Rscript --no-save ${QC}check_heterozygosity_rate.R
+
+# The following code generates a list of individuals who deviate more than 3 standard deviations from the heterozygosity rate mean.
+
+# For data manipulation we recommend using UNIX. However, when performing statistical calculations R might be more convenient, hence the use of the Rscript for this step:
+Rscript --no-save ${QC}heterozygosity_outliers_list.R
+
+# Output of the command above: fail-het-qc.txt .
+# When using our example data/the HapMap data this list contains 2 individuals (i.e., two individuals have a heterozygosity rate deviating more than 3 SD's from the mean).
+
+# Adapt this file to make it compatible for PLINK, by removing all quotation marks from the file and selecting only the first two columns.
+sed 's/"// g' ${QC}fail-het-qc.txt | awk '{print$1, $2}'> ${QC}het_fail_ind.txt
+
+# Remove heterozygosity rate outliers.
+${plink} --bfile ${QC}HapMap_3_r3_7 --remove ${QC}het_fail_ind.txt --extract ${QC}indepSNP.prune.in --make-bed --out ${QC}HapMap_3_r3_8
+rm ${QC}HapMap_3_r3_7*
+
+############################################################
+### step 6 ###
+
+# It is essential to check datasets you analyse for cryptic relatedness.
+# Assuming a random population sample we are going to exclude all individuals above the pihat threshold of 0.2 in this tutorial.
+
+# Check for relationships between individuals with a pihat > 0.2(i.e. second degree relatives)
+${plink} --bfile ${QC}HapMap_3_r3_8 --genome --min 0.2 --out ${QC}pihat_min0.2
+
+# The HapMap dataset is known to contain parent-offspring relations. 
+# The following commands will visualize specifically these parent-offspring relations, using the z values. 
+awk '{ if ($8 >0.9) print $0 }' ${QC}pihat_min0.2.genome> ${QC}zoom_pihat.genome
+
+# Generate a plot to assess the type of relationship.
+Rscript --no-save Relatedness.R
+
+# The generated plots show a considerable amount of related individuals (explentation plot; PO = parent-offspring, UN = unrelated individuals) in the Hapmap data, this is expected since the dataset was constructed as such.
+
+# Normally, family based data should be analyzed using specific family based methods. In this tutorial, for demonstrative purposes, we treat the relatedness as cryptic relatedness in a random population sample.
+
+# In this tutorial, we aim to remove all 'relatedness' from our dataset.
+
+# To demonstrate that the majority of the relatedness was due to parent-offspring we only include founders (individuals without parents in the dataset).
+${plink} --bfile ${QC}HapMap_3_r3_8 --filter-founders --make-bed --out ${QC}HapMap_3_r3_9
+rm ${QC}HapMap_3_r3_8*
+
+# Now we will look again for individuals with a pihat >0.2.
+#plink --bfile HapMap_3_r3_11 --extract indepSNP.prune.in --genome --min 0.2 --out pihat_min0.2_in_founders
+
+# The file 'pihat_min0.2_in_founders.genome' shows that, after exclusion of all non-founders, only 1 individual pair with a pihat greater than 0.2 remains in the HapMap data.
+# This is likely to be a full sib or DZ twin pair based on the Z values. Noteworthy, they were not given the same family identity (FID) in the HapMap data.
+
+# For each pair of 'related' individuals with a pihat > 0.2, we recommend to remove the individual with the lowest call rate. 
+#plink --bfile HapMap_3_r3_11 --missing
+# Use an UNIX text editor (e.g., vi(m) ) to check which individual has the highest call rate in the 'related pair'. 
+
+# Generate a list of FID and IID of the individual(s) with a Pihat above 0.2, to check who had the lower call rate of the pair.
+# In our dataset the individual 13291  NA07045 had the lower call rate.
+#vi 0.2_low_call_rate_pihat.txt
+#i 
+#13291  NA07045
+# Press esc on keyboard!
+#:x
+# Press enter on keyboard
+# In case of multiple 'related' pairs, the list generated above can be extended using the same method as for our lone 'related' pair.
+
+# Delete the individuals with the lowest call rate in 'related' pairs with a pihat > 0.2 
+#plink --bfile HapMap_3_r3_11 --remove 0.2_low_call_rate_pihat.txt --make-bed --out HapMap_3_r3_12
+
+################################################################################################################################
+
+# CONGRATULATIONS!! You've just succesfully completed the first tutorial! You are now able to conduct a proper genetic QC. 
+
+# For the next tutorial, using the script: 2_Main_script_MDS.txt, you need the following files:
+# - The bfile HapMap_3_r3_12 (i.e., HapMap_3_r3_12.fam,HapMap_3_r3_12.bed, and HapMap_3_r3_12.bim
+# - indepSNP.prune.in
+
+
